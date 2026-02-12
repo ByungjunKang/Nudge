@@ -96,6 +96,37 @@ class DSConv1dBlock(nn.Module):
         x = self.do(x)
         return x + x_in  # residual
 
+class TinyMelTCNFrame(nn.Module):
+    """
+    Per-frame causal TCN.
+    Input : [B, n_mels, F]
+    Output: [B, 3, F] logits
+    """
+    def __init__(self, n_mels=40, ch=64, dilations=(1, 2, 4, 8), k=5, dropout=0.05):
+        super().__init__()
+        self.n_mels = n_mels
+        self.ch = ch
+        self.dilations = dilations
+        self.k = k
+
+        self.in_proj = nn.Conv1d(n_mels, ch, kernel_size=1)
+        self.blocks = nn.ModuleList([
+            DSConv1dBlock(ch, k=k, dilation=d, dropout=dropout) for d in dilations
+        ])
+        self.out_proj = nn.Conv1d(ch, 3, kernel_size=1)
+
+    def receptive_field_frames(self) -> int:
+        # Causal conv stack RF (frames)
+        # RF = 1 + (k-1)*sum(dilations)
+        return 1 + (self.k - 1) * sum(self.dilations)
+
+    def forward(self, mel: torch.Tensor) -> torch.Tensor:
+        x = self.in_proj(mel)
+        for b in self.blocks:
+            x = b(x)
+        logits = self.out_proj(x)  # [B,3,F]
+        return logits
+
 
 class TinyMelTCN(nn.Module):
     def __init__(self, n_mels=40, ch=64, layers=(1, 2, 4), k=5, dropout=0.05):
